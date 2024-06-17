@@ -1,0 +1,6 @@
+[submodule "modules/gd_module_texture_share_vk"]
+	path = modules/gd_module_texture_share_vk
+	url = https://github.com/DigitOtter/gd_module_texture_share_vk.git
+[submodule "modules/gd_module_triangle_ray_select"]
+	path = modules/gd_module_triangle_ray_select
+	url = https://github.com/DigitOtter/gd_module_triangle_ray_select.git

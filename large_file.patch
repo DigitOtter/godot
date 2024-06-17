@@ -1,0 +1,524 @@
+diff --git a/core/io/file_access_compressed.h b/core/io/file_access_compressed.h
+index bf57eaa07c..349090caab 100644
+--- a/core/io/file_access_compressed.h
++++ b/core/io/file_access_compressed.h
+@@ -39,7 +39,7 @@ class FileAccessCompressed : public FileAccess {
+ 	bool writing = false;
+ 	uint64_t write_pos = 0;
+ 	uint8_t *write_ptr = nullptr;
+-	uint32_t write_buffer_size = 0;
++	uint64_t write_buffer_size = 0;
+ 	uint64_t write_max = 0;
+ 	uint32_t block_size = 0;
+ 	mutable bool read_eof = false;
+diff --git a/core/templates/cowdata.h b/core/templates/cowdata.h
+index 46d9797d6c..7867e719bc 100644
+--- a/core/templates/cowdata.h
++++ b/core/templates/cowdata.h
+@@ -74,15 +74,15 @@ private:
+ 			return nullptr;
+ 		}
+ 
+-		return reinterpret_cast<SafeNumeric<uint32_t> *>(_ptr) - 2;
++		return reinterpret_cast<SafeNumeric<uint32_t> *>(_ptr) - 4;
+ 	}
+ 
+-	_FORCE_INLINE_ uint32_t *_get_size() const {
++	_FORCE_INLINE_ uint64_t *_get_size() const {
+ 		if (!_ptr) {
+ 			return nullptr;
+ 		}
+ 
+-		return reinterpret_cast<uint32_t *>(_ptr) - 1;
++		return reinterpret_cast<uint64_t *>(_ptr) - 1;
+ 	}
+ 
+ 	_FORCE_INLINE_ size_t _get_alloc_size(size_t p_elements) const {
+@@ -105,10 +105,12 @@ private:
+ 		if (__builtin_add_overflow(o, static_cast<size_t>(32), &p)) {
+ 			return false; // No longer allocated here.
+ 		}
++
+ #else
+ 		// Speed is more important than correctness here, do the operations unchecked
+ 		// and hope for the best.
+ 		*out = _get_alloc_size(p_elements);
++
+ #endif
+ 		return *out;
+ 	}
+@@ -130,8 +132,8 @@ public:
+ 		return _ptr;
+ 	}
+ 
+-	_FORCE_INLINE_ int size() const {
+-		uint32_t *size = (uint32_t *)_get_size();
++	_FORCE_INLINE_ int64_t size() const {
++		uint64_t *size = (uint64_t *)_get_size();
+ 		if (size) {
+ 			return *size;
+ 		} else {
+@@ -142,42 +144,42 @@ public:
+ 	_FORCE_INLINE_ void clear() { resize(0); }
+ 	_FORCE_INLINE_ bool is_empty() const { return _ptr == nullptr; }
+ 
+-	_FORCE_INLINE_ void set(int p_index, const T &p_elem) {
++	_FORCE_INLINE_ void set(int64_t p_index, const T &p_elem) {
+ 		ERR_FAIL_INDEX(p_index, size());
+ 		_copy_on_write();
+ 		_ptr[p_index] = p_elem;
+ 	}
+ 
+-	_FORCE_INLINE_ T &get_m(int p_index) {
++	_FORCE_INLINE_ T &get_m(int64_t p_index) {
+ 		CRASH_BAD_INDEX(p_index, size());
+ 		_copy_on_write();
+ 		return _ptr[p_index];
+ 	}
+ 
+-	_FORCE_INLINE_ const T &get(int p_index) const {
++	_FORCE_INLINE_ const T &get(int64_t p_index) const {
+ 		CRASH_BAD_INDEX(p_index, size());
+ 
+ 		return _ptr[p_index];
+ 	}
+ 
+ 	template <bool p_ensure_zero = false>
+-	Error resize(int p_size);
++	Error resize(int64_t p_size);
+ 
+-	_FORCE_INLINE_ void remove_at(int p_index) {
++	_FORCE_INLINE_ void remove_at(int64_t p_index) {
+ 		ERR_FAIL_INDEX(p_index, size());
+ 		T *p = ptrw();
+-		int len = size();
+-		for (int i = p_index; i < len - 1; i++) {
++		int64_t len = size();
++		for (int64_t i = p_index; i < len - 1; i++) {
+ 			p[i] = p[i + 1];
+ 		}
+ 
+ 		resize(len - 1);
+ 	}
+ 
+-	Error insert(int p_pos, const T &p_val) {
++	Error insert(int64_t p_pos, const T &p_val) {
+ 		ERR_FAIL_INDEX_V(p_pos, size() + 1, ERR_INVALID_PARAMETER);
+ 		resize(size() + 1);
+-		for (int i = (size() - 1); i > p_pos; i--) {
++		for (int64_t i = (size() - 1); i > p_pos; i--) {
+ 			set(i, get(i - 1));
+ 		}
+ 		set(p_pos, p_val);
+@@ -185,9 +187,9 @@ public:
+ 		return OK;
+ 	}
+ 
+-	int find(const T &p_val, int p_from = 0) const;
+-	int rfind(const T &p_val, int p_from = -1) const;
+-	int count(const T &p_val) const;
++	int64_t find(const T &p_val, int64_t p_from = 0) const;
++	int64_t rfind(const T &p_val, int64_t p_from = -1) const;
++	int64_t count(const T &p_val) const;
+ 
+ 	_FORCE_INLINE_ CowData() {}
+ 	_FORCE_INLINE_ ~CowData();
+@@ -208,10 +210,10 @@ void CowData<T>::_unref(void *p_data) {
+ 	// clean up
+ 
+ 	if (!std::is_trivially_destructible<T>::value) {
+-		uint32_t *count = _get_size();
++		uint64_t *count = _get_size();
+ 		T *data = (T *)(count + 1);
+ 
+-		for (uint32_t i = 0; i < *count; ++i) {
++		for (uint64_t i = 0; i < *count; ++i) {
+ 			// call destructors
+ 			data[i].~T();
+ 		}
+@@ -232,9 +234,9 @@ uint32_t CowData<T>::_copy_on_write() {
+ 	uint32_t rc = refc->get();
+ 	if (unlikely(rc > 1)) {
+ 		/* in use by more than me */
+-		uint32_t current_size = *_get_size();
++		uint64_t current_size = *_get_size();
+ 
+-		uint32_t *mem_new = (uint32_t *)Memory::alloc_static(_get_alloc_size(current_size), true);
++		uint64_t *mem_new = (uint64_t *)Memory::alloc_static(_get_alloc_size(current_size), true);
+ 
+ 		new (mem_new - 2) SafeNumeric<uint32_t>(1); //refcount
+ 		*(mem_new - 1) = current_size; //size
+@@ -246,7 +248,7 @@ uint32_t CowData<T>::_copy_on_write() {
+ 			memcpy(mem_new, _ptr, current_size * sizeof(T));
+ 
+ 		} else {
+-			for (uint32_t i = 0; i < current_size; i++) {
++			for (uint64_t i = 0; i < current_size; i++) {
+ 				memnew_placement(&_data[i], T(_ptr[i]));
+ 			}
+ 		}
+@@ -261,10 +263,10 @@ uint32_t CowData<T>::_copy_on_write() {
+ 
+ template <class T>
+ template <bool p_ensure_zero>
+-Error CowData<T>::resize(int p_size) {
++Error CowData<T>::resize(int64_t p_size) {
+ 	ERR_FAIL_COND_V(p_size < 0, ERR_INVALID_PARAMETER);
+ 
+-	int current_size = size();
++	int64_t current_size = size();
+ 
+ 	if (p_size == current_size) {
+ 		return OK;
+@@ -288,7 +290,7 @@ Error CowData<T>::resize(int p_size) {
+ 		if (alloc_size != current_alloc_size) {
+ 			if (current_size == 0) {
+ 				// alloc from scratch
+-				uint32_t *ptr = (uint32_t *)Memory::alloc_static(alloc_size, true);
++				uint64_t *ptr = (uint64_t *)Memory::alloc_static(alloc_size, true);
+ 				ERR_FAIL_NULL_V(ptr, ERR_OUT_OF_MEMORY);
+ 				*(ptr - 1) = 0; //size, currently none
+ 				new (ptr - 2) SafeNumeric<uint32_t>(1); //refcount
+@@ -296,7 +298,7 @@ Error CowData<T>::resize(int p_size) {
+ 				_ptr = (T *)ptr;
+ 
+ 			} else {
+-				uint32_t *_ptrnew = (uint32_t *)Memory::realloc_static(_ptr, alloc_size, true);
++				uint64_t *_ptrnew = (uint64_t *)Memory::realloc_static(_ptr, alloc_size, true);
+ 				ERR_FAIL_NULL_V(_ptrnew, ERR_OUT_OF_MEMORY);
+ 				new (_ptrnew - 2) SafeNumeric<uint32_t>(rc); //refcount
+ 
+@@ -307,7 +309,7 @@ Error CowData<T>::resize(int p_size) {
+ 		// construct the newly created elements
+ 
+ 		if (!std::is_trivially_constructible<T>::value) {
+-			for (int i = *_get_size(); i < p_size; i++) {
++			for (int64_t i = *_get_size(); i < p_size; i++) {
+ 				memnew_placement(&_ptr[i], T);
+ 			}
+ 		} else if (p_ensure_zero) {
+@@ -319,14 +321,14 @@ Error CowData<T>::resize(int p_size) {
+ 	} else if (p_size < current_size) {
+ 		if (!std::is_trivially_destructible<T>::value) {
+ 			// deinitialize no longer needed elements
+-			for (uint32_t i = p_size; i < *_get_size(); i++) {
++			for (uint64_t i = p_size; i < *_get_size(); i++) {
+ 				T *t = &_ptr[i];
+ 				t->~T();
+ 			}
+ 		}
+ 
+ 		if (alloc_size != current_alloc_size) {
+-			uint32_t *_ptrnew = (uint32_t *)Memory::realloc_static(_ptr, alloc_size, true);
++			uint64_t *_ptrnew = (uint64_t *)Memory::realloc_static(_ptr, alloc_size, true);
+ 			ERR_FAIL_NULL_V(_ptrnew, ERR_OUT_OF_MEMORY);
+ 			new (_ptrnew - 2) SafeNumeric<uint32_t>(rc); //refcount
+ 
+@@ -340,14 +342,14 @@ Error CowData<T>::resize(int p_size) {
+ }
+ 
+ template <class T>
+-int CowData<T>::find(const T &p_val, int p_from) const {
+-	int ret = -1;
++int64_t CowData<T>::find(const T &p_val, int64_t p_from) const {
++	int64_t ret = -1;
+ 
+ 	if (p_from < 0 || size() == 0) {
+ 		return ret;
+ 	}
+ 
+-	for (int i = p_from; i < size(); i++) {
++	for (int64_t i = p_from; i < size(); i++) {
+ 		if (get(i) == p_val) {
+ 			ret = i;
+ 			break;
+@@ -358,8 +360,8 @@ int CowData<T>::find(const T &p_val, int p_from) const {
+ }
+ 
+ template <class T>
+-int CowData<T>::rfind(const T &p_val, int p_from) const {
+-	const int s = size();
++int64_t CowData<T>::rfind(const T &p_val, int64_t p_from) const {
++	const int64_t s = size();
+ 
+ 	if (p_from < 0) {
+ 		p_from = s + p_from;
+@@ -368,7 +370,7 @@ int CowData<T>::rfind(const T &p_val, int p_from) const {
+ 		p_from = s - 1;
+ 	}
+ 
+-	for (int i = p_from; i >= 0; i--) {
++	for (int64_t i = p_from; i >= 0; i--) {
+ 		if (get(i) == p_val) {
+ 			return i;
+ 		}
+@@ -377,9 +379,9 @@ int CowData<T>::rfind(const T &p_val, int p_from) const {
+ }
+ 
+ template <class T>
+-int CowData<T>::count(const T &p_val) const {
+-	int amount = 0;
+-	for (int i = 0; i < size(); i++) {
++int64_t CowData<T>::count(const T &p_val) const {
++	int64_t amount = 0;
++	for (int64_t i = 0; i < size(); i++) {
+ 		if (get(i) == p_val) {
+ 			amount++;
+ 		}
+diff --git a/core/templates/vector.h b/core/templates/vector.h
+index d8bac0870f..33d537ab04 100644
+--- a/core/templates/vector.h
++++ b/core/templates/vector.h
+@@ -48,7 +48,7 @@
+ template <class T>
+ class VectorWriteProxy {
+ public:
+-	_FORCE_INLINE_ T &operator[](int p_index) {
++	_FORCE_INLINE_ T &operator[](int64_t p_index) {
+ 		CRASH_BAD_INDEX(p_index, ((Vector<T> *)(this))->_cowdata.size());
+ 
+ 		return ((Vector<T> *)(this))->_cowdata.ptrw()[p_index];
+@@ -70,9 +70,9 @@ public:
+ 	_FORCE_INLINE_ bool append(const T &p_elem) { return push_back(p_elem); } //alias
+ 	void fill(T p_elem);
+ 
+-	void remove_at(int p_index) { _cowdata.remove_at(p_index); }
++	void remove_at(int64_t p_index) { _cowdata.remove_at(p_index); }
+ 	_FORCE_INLINE_ bool erase(const T &p_val) {
+-		int idx = find(p_val);
++		int64_t idx = find(p_val);
+ 		if (idx >= 0) {
+ 			remove_at(idx);
+ 			return true;
+@@ -87,17 +87,17 @@ public:
+ 	_FORCE_INLINE_ void clear() { resize(0); }
+ 	_FORCE_INLINE_ bool is_empty() const { return _cowdata.is_empty(); }
+ 
+-	_FORCE_INLINE_ T get(int p_index) { return _cowdata.get(p_index); }
+-	_FORCE_INLINE_ const T &get(int p_index) const { return _cowdata.get(p_index); }
+-	_FORCE_INLINE_ void set(int p_index, const T &p_elem) { _cowdata.set(p_index, p_elem); }
+-	_FORCE_INLINE_ int size() const { return _cowdata.size(); }
+-	Error resize(int p_size) { return _cowdata.resize(p_size); }
+-	Error resize_zeroed(int p_size) { return _cowdata.template resize<true>(p_size); }
+-	_FORCE_INLINE_ const T &operator[](int p_index) const { return _cowdata.get(p_index); }
+-	Error insert(int p_pos, T p_val) { return _cowdata.insert(p_pos, p_val); }
+-	int find(const T &p_val, int p_from = 0) const { return _cowdata.find(p_val, p_from); }
+-	int rfind(const T &p_val, int p_from = -1) const { return _cowdata.rfind(p_val, p_from); }
+-	int count(const T &p_val) const { return _cowdata.count(p_val); }
++	_FORCE_INLINE_ T get(int64_t p_index) { return _cowdata.get(p_index); }
++	_FORCE_INLINE_ const T &get(int64_t p_index) const { return _cowdata.get(p_index); }
++	_FORCE_INLINE_ void set(int64_t p_index, const T &p_elem) { _cowdata.set(p_index, p_elem); }
++	_FORCE_INLINE_ int64_t size() const { return _cowdata.size(); }
++	Error resize(int64_t p_size) { return _cowdata.resize(p_size); }
++	Error resize_zeroed(int64_t p_size) { return _cowdata.template resize<true>(p_size); }
++	_FORCE_INLINE_ const T &operator[](int64_t p_index) const { return _cowdata.get(p_index); }
++	Error insert(int64_t p_pos, T p_val) { return _cowdata.insert(p_pos, p_val); }
++	int64_t find(const T &p_val, int64_t p_from = 0) const { return _cowdata.find(p_val, p_from); }
++	int64_t rfind(const T &p_val, int64_t p_from = -1) const { return _cowdata.rfind(p_val, p_from); }
++	int64_t count(const T &p_val) const { return _cowdata.count(p_val); }
+ 
+ 	void append_array(Vector<T> p_other);
+ 
+@@ -109,7 +109,7 @@ public:
+ 
+ 	template <class Comparator, bool Validate = SORT_ARRAY_VALIDATE_ENABLED, class... Args>
+ 	void sort_custom(Args &&...args) {
+-		int len = _cowdata.size();
++		int64_t len = _cowdata.size();
+ 		if (len == 0) {
+ 			return;
+ 		}
+@@ -119,12 +119,12 @@ public:
+ 		sorter.sort(data, len);
+ 	}
+ 
+-	int bsearch(const T &p_value, bool p_before) {
++	int64_t bsearch(const T &p_value, bool p_before) {
+ 		return bsearch_custom<_DefaultComparator<T>>(p_value, p_before);
+ 	}
+ 
+ 	template <class Comparator, class Value, class... Args>
+-	int bsearch_custom(const Value &p_value, bool p_before, Args &&...args) {
++	int64_t bsearch_custom(const Value &p_value, bool p_before, Args &&...args) {
+ 		SearchArray<T, Comparator> search{ args... };
+ 		return search.bisect(ptrw(), size(), p_value, p_before);
+ 	}
+@@ -134,7 +134,7 @@ public:
+ 	}
+ 
+ 	void ordered_insert(const T &p_val) {
+-		int i;
++		int64_t i;
+ 		for (i = 0; i < _cowdata.size(); i++) {
+ 			if (p_val < operator[](i)) {
+ 				break;
+@@ -157,28 +157,28 @@ public:
+ 		return ret;
+ 	}
+ 
+-	Vector<T> slice(int p_begin, int p_end = INT_MAX) const {
++	Vector<T> slice(int64_t p_begin, int64_t p_end = INT64_MAX) const {
+ 		Vector<T> result;
+ 
+-		const int s = size();
++		const int64_t s = size();
+ 
+-		int begin = CLAMP(p_begin, -s, s);
++		int64_t begin = CLAMP(p_begin, -s, s);
+ 		if (begin < 0) {
+ 			begin += s;
+ 		}
+-		int end = CLAMP(p_end, -s, s);
++		int64_t end = CLAMP(p_end, -s, s);
+ 		if (end < 0) {
+ 			end += s;
+ 		}
+ 
+ 		ERR_FAIL_COND_V(begin > end, result);
+ 
+-		int result_size = end - begin;
++		int64_t result_size = end - begin;
+ 		result.resize(result_size);
+ 
+ 		const T *const r = ptr();
+ 		T *const w = result.ptrw();
+-		for (int i = 0; i < result_size; ++i) {
++		for (int64_t i = 0; i < result_size; ++i) {
+ 			w[i] = r[begin + i];
+ 		}
+ 
+@@ -186,11 +186,11 @@ public:
+ 	}
+ 
+ 	bool operator==(const Vector<T> &p_arr) const {
+-		int s = size();
++		int64_t s = size();
+ 		if (s != p_arr.size()) {
+ 			return false;
+ 		}
+-		for (int i = 0; i < s; i++) {
++		for (int64_t i = 0; i < s; i++) {
+ 			if (operator[](i) != p_arr[i]) {
+ 				return false;
+ 			}
+@@ -199,11 +199,11 @@ public:
+ 	}
+ 
+ 	bool operator!=(const Vector<T> &p_arr) const {
+-		int s = size();
++		int64_t s = size();
+ 		if (s != p_arr.size()) {
+ 			return true;
+ 		}
+-		for (int i = 0; i < s; i++) {
++		for (int64_t i = 0; i < s; i++) {
+ 			if (operator[](i) != p_arr[i]) {
+ 				return true;
+ 			}
+@@ -280,7 +280,7 @@ public:
+ 		Error err = _cowdata.resize(p_init.size());
+ 		ERR_FAIL_COND(err);
+ 
+-		int i = 0;
++		int64_t i = 0;
+ 		for (const T &element : p_init) {
+ 			_cowdata.set(i++, element);
+ 		}
+@@ -292,7 +292,7 @@ public:
+ 
+ template <class T>
+ void Vector<T>::reverse() {
+-	for (int i = 0; i < size() / 2; i++) {
++	for (int64_t i = 0; i < size() / 2; i++) {
+ 		T *p = ptrw();
+ 		SWAP(p[i], p[size() - i - 1]);
+ 	}
+@@ -300,13 +300,13 @@ void Vector<T>::reverse() {
+ 
+ template <class T>
+ void Vector<T>::append_array(Vector<T> p_other) {
+-	const int ds = p_other.size();
++	const int64_t ds = p_other.size();
+ 	if (ds == 0) {
+ 		return;
+ 	}
+-	const int bs = size();
++	const int64_t bs = size();
+ 	resize(bs + ds);
+-	for (int i = 0; i < ds; ++i) {
++	for (int64_t i = 0; i < ds; ++i) {
+ 		ptrw()[bs + i] = p_other[i];
+ 	}
+ }
+@@ -323,7 +323,7 @@ bool Vector<T>::push_back(T p_elem) {
+ template <class T>
+ void Vector<T>::fill(T p_elem) {
+ 	T *p = ptrw();
+-	for (int i = 0; i < size(); i++) {
++	for (int64_t i = 0; i < size(); i++) {
+ 		p[i] = p_elem;
+ 	}
+ }
+diff --git a/core/typedefs.h b/core/typedefs.h
+index 9fa5ba320c..f8ec136bde 100644
+--- a/core/typedefs.h
++++ b/core/typedefs.h
+@@ -142,7 +142,7 @@ inline void __swap_tmpl(T &x, T &y) {
+ /* Functions to handle powers of 2 and shifting. */
+ 
+ // Function to find the next power of 2 to an integer.
+-static _FORCE_INLINE_ unsigned int next_power_of_2(unsigned int x) {
++static _FORCE_INLINE_ uint64_t next_power_of_2(uint64_t x) {
+ 	if (x == 0) {
+ 		return 0;
+ 	}
+@@ -153,30 +153,32 @@ static _FORCE_INLINE_ unsigned int next_power_of_2(unsigned int x) {
+ 	x |= x >> 4;
+ 	x |= x >> 8;
+ 	x |= x >> 16;
++	x |= x >> 32;
+ 
+ 	return ++x;
+ }
+ 
+ // Function to find the previous power of 2 to an integer.
+-static _FORCE_INLINE_ unsigned int previous_power_of_2(unsigned int x) {
++static _FORCE_INLINE_ uint64_t previous_power_of_2(uint64_t x) {
+ 	x |= x >> 1;
+ 	x |= x >> 2;
+ 	x |= x >> 4;
+ 	x |= x >> 8;
+ 	x |= x >> 16;
++	x |= x >> 32;
+ 	return x - (x >> 1);
+ }
+ 
+ // Function to find the closest power of 2 to an integer.
+-static _FORCE_INLINE_ unsigned int closest_power_of_2(unsigned int x) {
+-	unsigned int nx = next_power_of_2(x);
+-	unsigned int px = previous_power_of_2(x);
++static _FORCE_INLINE_ uint64_t closest_power_of_2(uint64_t x) {
++	uint64_t nx = next_power_of_2(x);
++	uint64_t px = previous_power_of_2(x);
+ 	return (nx - x) > (x - px) ? px : nx;
+ }
+ 
+ // Get a shift value from a power of 2.
+-static inline int get_shift_from_power_of_2(unsigned int p_bits) {
+-	for (unsigned int i = 0; i < 32; i++) {
++static inline int64_t get_shift_from_power_of_2(int64_t p_bits) {
++	for (unsigned int i = 0; i < 64; i++) {
+ 		if (p_bits == (unsigned int)(1 << i)) {
+ 			return i;
+ 		}
+@@ -204,8 +206,8 @@ static _FORCE_INLINE_ T nearest_power_of_2_templated(T x) {
+ }
+ 
+ // Function to find the nearest (bigger) power of 2 to an integer.
+-static inline unsigned int nearest_shift(unsigned int p_number) {
+-	for (int i = 30; i >= 0; i--) {
++static inline uint64_t nearest_shift(uint64_t p_number) {
++	for (int i = 62; i >= 0; i--) {
+ 		if (p_number & (1 << i)) {
+ 			return i + 1;
+ 		}
