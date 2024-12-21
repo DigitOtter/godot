@@ -122,6 +122,7 @@ Error RenderingContextDriverVulkan::_initialize_instance_extensions() {
 	// TextureShareVk Extensions
 	_register_requested_instance_extension(VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME, true);
 	_register_requested_instance_extension(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME, true);
+	_register_requested_instance_extension(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME, true);
 
 	// Load instance extensions that are available.
 	uint32_t instance_extension_count = 0;

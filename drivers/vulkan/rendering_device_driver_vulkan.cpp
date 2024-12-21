@@ -504,6 +504,7 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
 	_register_requested_device_extension(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME, true);
 	_register_requested_device_extension(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME, true);
 	_register_requested_device_extension(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME, true);
+	_register_requested_device_extension(VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME, true);
 
 	// TriangleRaySelect Extensions
 	_register_requested_device_extension(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME, true);
